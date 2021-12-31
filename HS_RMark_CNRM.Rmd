@@ -1,0 +1,208 @@
+---
+title: "Hot Spots Code"
+author: "Martin Mokros"
+date: "12/07/2020"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+Firstly we will import all the raster layers
+
+four periods: 1961-1990 (past - p)   
+              2041-2060 (Future first period - f1)  
+              2061-2080 (Future second period - f2)   
+              2081-2100 (Future third period - f3). 
+
+nine variables: Cont; DDa5; EQ; FFP; LLDP; MWMT; nDP; pr_ann; tasmax
+
+one model: CNRM
+
+Altogether 36 raster layers will be diveded to four groups based on the time period
+
+
+```{r}
+library(raster)
+library(rasterVis)
+library(mgcv)
+```
+
+```{r}
+dataroot = "C:/HotSpot_R/RCP45/DATA_CNRM"
+
+p.list = list.files(dataroot, pattern="1961",full.names=T)
+f1.list = list.files(dataroot, pattern="2041",full.names=T)
+f2.list = list.files(dataroot, pattern="2061",full.names=T)
+f3.list = list.files(dataroot, pattern="2081",full.names=T)
+
+rp.list = lapply(p.list, raster)
+rf1.list = lapply(f1.list, raster)
+rf2.list = lapply(f2.list, raster)
+rf3.list = lapply(f3.list, raster)
+
+
+for (i in 1:9) {
+  NAvalue(rp.list[[i]]) = -3.402823e+38
+  NAvalue(rf1.list[[i]]) = -3.402823e+38
+  NAvalue(rf2.list[[i]]) = -3.402823e+38
+  NAvalue(rf3.list[[i]]) = -3.402823e+38
+}
+
+
+```
+
+Example of Cont for four periods from CNRM model:
+
+```{r, echo=FALSE, fig.height= 15, fig.width= 15}
+
+s = stack(rp.list[[1]], rf1.list[[1]], rf2.list[[1]], rf3.list[[1]])
+levelplot(s, layout=c(2,2), par.settings=BuRdTheme, main="Cont", names.attr=c("1961-1990", "2041-2060", "2060-2081", "2081-2100"))
+
+
+```
+
+Calculation of Standardize Euclidean Distance (SED)
+
+```{r}
+SED1_list = list()
+SED2_list = list()
+SED3_list = list()
+
+for (i in 1:9){
+
+  p = rp.list[[i]]
+  f1 = rf1.list[[i]]
+  f2 = rf2.list[[i]]
+  f3 = rf3.list[[i]]
+  
+  minus1 = abs(f1 - p)
+  minus2 = abs(f2 - p)
+  minus3 = abs(f3 - p)
+  
+  q1 = quantile(minus1,  probs = c(0.95))
+  q2 = quantile(minus2,  probs = c(0.95))
+  q3 = quantile(minus3,  probs = c(0.95))
+
+  SED1 = (minus1 / q1)^2
+  SED2 = (minus2 / q2)^2
+  SED3 = (minus3 / q3)^2
+
+  SED1[SED1>1] = 1
+  SED2[SED2>1] = 1
+  SED3[SED3>1] = 1
+  
+  SED1_list[[i]] = SED1
+  SED2_list[[i]] = SED2
+  SED3_list[[i]] = SED3
+}
+
+SED1r = stack(SED1_list)
+SED2r = stack(SED2_list)
+SED3r = stack(SED3_list)
+
+```
+
+Example of SED for each time period
+
+```{r, echo=FALSE, fig.height= 10, fig.width= 20}
+s = stack(SED1r[[1]], SED2r[[1]], SED3r[[1]])
+levelplot(s, layout=c(3,1), par.settings=BuRdTheme, main="Standardized Euclidean Distance", names.attr=c("2041-2060", "2060-2081", "2081-2100"))
+```
+
+Calculation of Aggregate Climate Change 
+
+```{r}
+CNRM_1 = sqrt(calc(subset(SED1r, 1:9), sum))
+CNRM_2 = sqrt(calc(subset(SED2r, 1:9), sum))
+CNRM_3 = sqrt(calc(subset(SED3r, 1:9), sum))
+
+```
+
+Visualization of Aggregate Climate Change for each time period and model
+
+```{r, echo=FALSE, fig.height= 10, fig.width= 20}
+s = stack(CNRM_1, CNRM_2, CNRM_3)
+levelplot(s, layout=c(3,1), par.settings=BuRdTheme, main="Aggregate Climate Change",
+          names.attr=c("CNRM 2041-2060", "CNRM 2061-2080", "CNRM 2081-2100"))
+```
+
+
+Calculation of relative Aggregate Climate Change (%) 
+
+```{r}
+CNRM_1_per = (CNRM_1/sqrt(9))*100
+CNRM_2_per = (CNRM_2/sqrt(9))*100
+CNRM_3_per = (CNRM_3/sqrt(9))*100
+```
+
+Visualization of relative Aggregate Climate Change (%) for each time period and model
+
+```{r, echo=FALSE, fig.height= 10, fig.width= 20}
+s = stack(CNRM_1_per, CNRM_2_per, CNRM_3_per)
+levelplot(s, layout=c(3,1), par.settings=BuRdTheme, main="relative Aggregate Climate Change (%)",
+          names.attr=c("CNRM 2041-2060", "CNRM 2061-2080", "CNRM 2081-2100"))
+
+```
+
+Applying generalized additive model (GAM) to identify regional HotSPots
+```{r}
+CNRM_1_gam = as.data.frame(CNRM_1_per, xy = TRUE)
+CNRM_2_gam = as.data.frame(CNRM_2_per, xy = TRUE)
+CNRM_3_gam = as.data.frame(CNRM_3_per, xy = TRUE)
+
+la = CNRM_1_gam$y
+lo = CNRM_1_gam$x
+ACC = CNRM_1_gam$layer
+M1 = gam(ACC~s(la,lo, bs="sos"))
+sink("CNRM_1_gam.txt")
+print(summary(M1))
+sink()
+CNRM_1_gam = na.omit(CNRM_1_gam)
+CNRM_1_gam$residuals = residuals(M1)
+CNRM_1_gam$fitted = fitted(M1)
+
+la = CNRM_2_gam$y
+lo = CNRM_2_gam$x
+ACC = CNRM_2_gam$layer
+M2 = gam(ACC~s(la,lo, bs="sos"))
+sink("CNRM_2_gam.txt")
+print(summary(M2))
+sink()
+CNRM_2_gam = na.omit(CNRM_2_gam)
+CNRM_2_gam$residuals = residuals(M2)
+CNRM_2_gam$fitted = fitted(M2)
+
+la = CNRM_3_gam$y
+lo = CNRM_3_gam$x
+ACC = CNRM_3_gam$layer
+M3 = gam(ACC~s(la,lo, bs="sos"))
+sink("CNRM_3_gam.txt")
+print(summary(M3))
+sink()
+CNRM_3_gam = na.omit(CNRM_3_gam)
+CNRM_3_gam$residuals = residuals(M3)
+CNRM_3_gam$fitted = fitted(M3)
+
+CNRM_1_gam_brick = rasterFromXYZ(CNRM_1_gam)
+CNRM_1_res = raster(CNRM_1_gam_brick, layer=2)
+CNRM_1_fit = raster(CNRM_1_gam_brick, layer=3)
+
+CNRM_2_gam_brick = rasterFromXYZ(CNRM_2_gam)
+CNRM_2_res = raster(CNRM_2_gam_brick, layer=2)
+CNRM_2_fit = raster(CNRM_2_gam_brick, layer=3)
+
+CNRM_3_gam_brick = rasterFromXYZ(CNRM_3_gam)
+CNRM_3_res = raster(CNRM_3_gam_brick, layer=2)
+CNRM_3_fit = raster(CNRM_3_gam_brick, layer=3)
+
+```
+
+Visualization of calculated residuals by generalized additive model (GAM)
+```{r, echo=FALSE, fig.height= 10, fig.width= 20}
+s = stack(CNRM_1_res, CNRM_2_res, CNRM_3_res)
+levelplot(s, layout=c(3,1), par.settings=BuRdTheme, main="Residuals",
+          names.attr=c("CNRM 2041-2060", "CNRM 2061-2080", "CNRM 2081-2100"))
+
+```
+
