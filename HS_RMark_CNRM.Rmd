@@ -29,7 +29,7 @@ library(mgcv)
 ```
 
 ```{r}
-dataroot = "C:/HotSpot_R/RCP45/DATA_CNRM"
+dataroot = "C:/DATA_CNRM"
 
 p.list = list.files(dataroot, pattern="1961",full.names=T)
 f1.list = list.files(dataroot, pattern="2041",full.names=T)
